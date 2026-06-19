@@ -200,6 +200,8 @@ class Keys:
             HEAD_COUNT = "{arch}.attention.indexer.head_count"
             KEY_LENGTH = "{arch}.attention.indexer.key_length"
             TOP_K      = "{arch}.attention.indexer.top_k"
+            BLOCK_SIZE   = "{arch}.attention.indexer.block_size"    //MSA
+            LOCAL_BLOCKS = "{arch}.attention.indexer.local_blocks"  //MSA
 
     class HyperConnection:
         COUNT                = "{arch}.hyper_connection.count"
@@ -777,6 +779,10 @@ class MODEL_TENSOR(IntEnum):
     INDEXER_COMPRESSOR_WGATE = auto()
     INDEXER_COMPRESSOR_APE = auto()
     INDEXER_COMPRESSOR_NORM = auto()
+    INDEX_Q_PROJ         = auto()
+    INDEX_K_PROJ         = auto()
+    INDEX_Q_NORM         = auto()
+    INDEX_K_NORM         = auto()
     # vision
     V_MMPROJ             = auto()
     V_MMPROJ_FC          = auto()
@@ -1360,6 +1366,10 @@ TENSOR_NAMES: dict[MODEL_TENSOR, str] = {
     MODEL_TENSOR.INDEXER_COMPRESSOR_WGATE:  "blk.{bid}.indexer_compressor_gate",
     MODEL_TENSOR.INDEXER_COMPRESSOR_APE:    "blk.{bid}.indexer_compressor_ape",
     MODEL_TENSOR.INDEXER_COMPRESSOR_NORM:   "blk.{bid}.indexer_compressor_norm",
+    MODEL_TENSOR.INDEX_Q_PROJ:              "blk.{bid}.index_q_proj",
+    MODEL_TENSOR.INDEX_K_PROJ:              "blk.{bid}.index_k_proj",
+    MODEL_TENSOR.INDEX_Q_NORM:              "blk.{bid}.index_q_norm",
+    MODEL_TENSOR.INDEX_K_NORM:              "blk.{bid}.index_k_norm",
     # vision
     MODEL_TENSOR.V_MMPROJ:                  "mm.{bid}",
     MODEL_TENSOR.V_MMPROJ_FC:               "mm.model.fc",
@@ -4166,6 +4176,13 @@ MODEL_TENSORS: dict[MODEL_ARCH, list[MODEL_TENSOR]] = {
         MODEL_TENSOR.FFN_GATE,
         MODEL_TENSOR.FFN_DOWN,
         MODEL_TENSOR.FFN_UP,
+        MODEL_TENSOR.INDEX_Q_PROJ,
+        MODEL_TENSOR.INDEX_K_PROJ,
+        MODEL_TENSOR.INDEX_Q_NORM,
+        MODEL_TENSOR.INDEX_K_NORM,
+        
+        
+        
     ],
     MODEL_ARCH.COGVLM: [
         MODEL_TENSOR.TOKEN_EMBD,
