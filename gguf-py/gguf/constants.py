@@ -779,10 +779,9 @@ class MODEL_TENSOR(IntEnum):
     INDEXER_COMPRESSOR_WGATE = auto()
     INDEXER_COMPRESSOR_APE = auto()
     INDEXER_COMPRESSOR_NORM = auto()
-    INDEX_Q_PROJ         = auto()
-    INDEX_K_PROJ         = auto()
-    INDEX_Q_NORM         = auto()
-    INDEX_K_NORM         = auto()
+    INDEXER_Q_PROJ       = auto()
+    INDEXER_K_PROJ       = auto()
+    INDEXER_Q_NORM       = auto()
     # vision
     V_MMPROJ             = auto()
     V_MMPROJ_FC          = auto()
@@ -1366,10 +1365,9 @@ TENSOR_NAMES: dict[MODEL_TENSOR, str] = {
     MODEL_TENSOR.INDEXER_COMPRESSOR_WGATE:  "blk.{bid}.indexer_compressor_gate",
     MODEL_TENSOR.INDEXER_COMPRESSOR_APE:    "blk.{bid}.indexer_compressor_ape",
     MODEL_TENSOR.INDEXER_COMPRESSOR_NORM:   "blk.{bid}.indexer_compressor_norm",
-    MODEL_TENSOR.INDEX_Q_PROJ:              "blk.{bid}.index_q_proj",
-    MODEL_TENSOR.INDEX_K_PROJ:              "blk.{bid}.index_k_proj",
-    MODEL_TENSOR.INDEX_Q_NORM:              "blk.{bid}.index_q_norm",
-    MODEL_TENSOR.INDEX_K_NORM:              "blk.{bid}.index_k_norm",
+    MODEL_TENSOR.INDEXER_Q_PROJ:            "blk.{bid}.indexer.q_proj",
+    MODEL_TENSOR.INDEXER_K_PROJ:            "blk.{bid}.indexer.k_proj",
+    MODEL_TENSOR.INDEXER_Q_NORM:            "blk.{bid}.indexer.q_norm",
     # vision
     MODEL_TENSOR.V_MMPROJ:                  "mm.{bid}",
     MODEL_TENSOR.V_MMPROJ_FC:               "mm.model.fc",
@@ -4176,10 +4174,10 @@ MODEL_TENSORS: dict[MODEL_ARCH, list[MODEL_TENSOR]] = {
         MODEL_TENSOR.FFN_GATE,
         MODEL_TENSOR.FFN_DOWN,
         MODEL_TENSOR.FFN_UP,
-        MODEL_TENSOR.INDEX_Q_PROJ,
-        MODEL_TENSOR.INDEX_K_PROJ,
-        MODEL_TENSOR.INDEX_Q_NORM,
-        MODEL_TENSOR.INDEX_K_NORM,
+        MODEL_TENSOR.INDEXER_Q_PROJ,
+        MODEL_TENSOR.INDEXER_K_PROJ,
+        MODEL_TENSOR.INDEXER_Q_NORM,
+        MODEL_TENSOR.INDEXER_K_NORM,
         
         
         
