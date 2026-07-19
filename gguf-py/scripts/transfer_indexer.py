@@ -60,18 +60,34 @@ MSA_OLD_PREFIXES = ('index_q_proj', 'index_k_proj', 'index_q_norm', 'index_k_nor
 
 def is_indexer_tensor(name):
     """Check if a tensor name is an MSA indexer tensor (not a DSA compressor tensor)."""
+    # Strip .weight/.bias suffix to get the base tensor name
+    # (GGUF stores tensors as blk.N.indexer.q_proj.weight, etc.)
+    base = name
+    for suffix in ('.weight', '.bias'):
+        if base.endswith(suffix):
+            base = base[:-len(suffix)]
+            break
+
     # Match new-style: blk.N.indexer.{q_proj,k_proj,q_norm,k_norm}
-    if '.indexer.' in name:
+    if '.indexer.' in base:
         for suffix in MSA_INDEXER_SUFFIXES:
-            if name.endswith(suffix):
+            if base.endswith(suffix):
                 return True
         # Exclude DSA tensors: indexer.proj, indexer.attn_k, indexer.attn_q_b
         return False
     # Match old-style: blk.N.index_{q_proj,k_proj,q_norm,k_norm}
     for prefix in MSA_OLD_PREFIXES:
-        if prefix in name:
+        if prefix in base:
             return True
     return False
+
+def rename_indexer_tensor(name):
+    """Rename old-style indexer tensor names to new-style (index_q_proj -> indexer.q_proj)."""
+    name = name.replace('index_q_proj', 'indexer.q_proj')
+    name = name.replace('index_k_proj', 'indexer.k_proj')
+    name = name.replace('index_q_norm', 'indexer.q_norm')
+    name = name.replace('index_k_norm', 'indexer.k_norm')
+    return name
 
 
 def get_field_value(field) -> Any:
