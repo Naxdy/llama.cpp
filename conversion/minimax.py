@@ -71,10 +71,10 @@ class MiniMaxM3Model(MiniMaxM2Model):
         self.gguf_writer.add_indexer_block_size(sac["sparse_block_size"])
         self.gguf_writer.add_indexer_local_blocks(sac["sparse_local_block"])
 
-        moe_layer_freq = self.find_hparam(["moe_layer_freq"])
+        moe_layer_freq = self.find_hparam(["moe_layer_freq", "mlp_layer_types"])
         n_dense = 0
         for v in moe_layer_freq:
-            if v == 0:
+            if v == 0 or v == "dense":
                 n_dense += 1
             else:
                 break
