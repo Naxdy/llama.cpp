@@ -1754,6 +1754,54 @@ void llama_kv_cache::set_input_kq_mask(ggml_tensor * dst, const llama_ubatch * u
     //LLAMA_LOG_ERROR("%s: kq mask time: %0.3f ms\n", __func__, (t_end - t_start)/1000.0);
 }
 
+void llama_kv_cache::set_input_dsa_sink(ggml_tensor * dst, const llama_ubatch * ubatch) const {
+    const uint32_t n_tokens = ubatch->n_tokens;
+
+    GGML_ASSERT(ggml_backend_buffer_is_host(dst->buffer));
+    GGML_ASSERT(dst->type == GGML_TYPE_F32);
+
+    const int64_t n_kv     = dst->ne[0];
+    const int64_t n_stream = dst->ne[3];
+
+    GGML_ASSERT(n_tokens % n_stream == 0);
+
+    const int64_t n_tps = n_tokens / n_stream;
+
+    float * data = (float *) dst->data;
+    std::memset(data, 0, ggml_nbytes(dst));
+
+    // DSA sink protection: boost the first n_sink present tokens of each
+    // sequence so they always survive the indexer top-k selection. Without
+    // this, heavily-quantized (IQ2) indexers can drop the attention sink from
+    // top-k, destabilizing generation. n_sink defaults to 1 (the BOS/first
+    // token); env DSA_SINK overrides (debug only).
+    static const int n_sink = []{ const char * e = getenv("DSA_SINK"); return e ? atoi(e) : 1; }();
+    if (n_sink <= 0) return;
+
+    for (uint32_t s = 0; s < n_stream; ++s) {
+        for (uint32_t ii = 0; ii < n_tps; ++ii) {
+            const uint32_t i = s * n_tps + ii;
+            const llama_seq_id seq_id = ubatch->seq_id[i][0];
+
+            const auto & cells = v_cells.at(seq_to_stream[seq_id]);
+
+            const llama_pos first_pos = cells.seq_pos_min(seq_id);
+            if (first_pos < 0) continue;
+
+            const uint64_t idst = n_kv * i;
+
+            for (int64_t j = 0; j < n_kv; ++j) {
+                if (cells.is_empty(j)) continue;
+                if (!cells.seq_has(j, seq_id)) continue;
+                const llama_pos p = cells.pos_get(j);
+                if (p >= first_pos && p < first_pos + n_sink) {
+                    data[idst + j] = 1e20f;
+                }
+            }
+        }
+    }
+}
+
 void llama_kv_cache::set_input_pos_bucket(ggml_tensor * dst, const llama_ubatch * ubatch) const {
     const int64_t n_tokens = ubatch->n_tokens;
 
@@ -2621,6 +2669,10 @@ void llama_kv_cache_context::set_input_v_idxs(ggml_tensor * dst, const llama_uba
 
 void llama_kv_cache_context::set_input_kq_mask(ggml_tensor * dst, const llama_ubatch * ubatch, bool causal_attn) const {
     kv->set_input_kq_mask(dst, ubatch, causal_attn);
+}
+
+void llama_kv_cache_context::set_input_dsa_sink(ggml_tensor * dst, const llama_ubatch * ubatch) const {
+    kv->set_input_dsa_sink(dst, ubatch);
 }
 
 void llama_kv_cache_context::set_input_pos_bucket(ggml_tensor * dst, const llama_ubatch * ubatch) const {

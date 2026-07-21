@@ -369,6 +369,16 @@ llama_model_glm_dsa::graph::graph(const llama_model & model, const llm_graph_par
                     cb(indexer_score, "indexer_score", il);
                 }
 
+                // DSA sink protection: boost the first present token of each sequence
+                // so it always survives the top-k selection. Critical for IQ2-quantized
+                // indexers where noisy scores can drop the sink token, destabilizing
+                // generation. The boost is finite (1e20) so it cannot un-mask future
+                // or cross-sequence keys that the causal mask already excludes.
+                if (inp_attn_dsa->self_dsa_sink) {
+                    indexer_score = ggml_add(ctx0, indexer_score, inp_attn_dsa->self_dsa_sink);
+                    cb(indexer_score, "indexer_score_sink", il);
+                }
+
                 // get indices of top k indexer scores
                 uint32_t n_top_k = indexer_score->ne[0] < n_indexer_top_k ? (uint32_t) indexer_score->ne[0] : n_indexer_top_k;
                 top_k = ggml_cont(ctx0, ggml_top_k(ctx0, indexer_score, n_top_k));

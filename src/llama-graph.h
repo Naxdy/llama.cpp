@@ -419,6 +419,11 @@ public:
 
     ggml_tensor * self_k_rot_lid = nullptr;
 
+    // DSA sink boost: F32 [n_kv, n_batch/n_stream, 1, n_stream], 1e20 for the
+    // first present token of each sequence, 0 elsewhere. Added to the indexer
+    // score before top-k so heavily-quantized indexers cannot drop the sink.
+    ggml_tensor * self_dsa_sink = nullptr;
+
     const llama_hparams hparams;
     const llama_cparams cparams;
 

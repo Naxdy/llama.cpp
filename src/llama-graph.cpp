@@ -528,6 +528,10 @@ void llm_graph_input_attn_k_dsa::set_input(const llama_ubatch * ubatch) {
     mctx->get_lid()->set_input_kq_mask(self_kq_mask_lid, ubatch, cparams.causal_attn);
 
     mctx->get_lid()->set_input_k_rot(self_k_rot_lid);
+
+    if (self_dsa_sink && self_dsa_sink->buffer) {
+        mctx->get_lid()->set_input_dsa_sink(self_dsa_sink, ubatch);
+    }
 }
 
 bool llm_graph_input_attn_k_dsa::can_reuse(const llm_graph_params & params) {
@@ -3033,6 +3037,15 @@ llm_graph_input_attn_k_dsa * llm_graph_context::build_attn_inp_k_dsa() const {
         inp->self_kq_mask_lid_cnv = inp->self_kq_mask_lid;
 
         inp->self_k_rot_lid = mctx_cur->get_lid()->build_input_k_rot(ctx0);
+
+        // DSA sink boost tensor: same shape as the lid KQ mask, F32.
+        // Filled at runtime with 1e20 for the first present token of each
+        // sequence so the sink always survives the indexer top-k selection.
+        inp->self_dsa_sink = ggml_new_tensor_4d(ctx0, GGML_TYPE_F32,
+                inp->self_kq_mask_lid->ne[0], inp->self_kq_mask_lid->ne[1],
+                inp->self_kq_mask_lid->ne[2], inp->self_kq_mask_lid->ne[3]);
+        ggml_set_input(inp->self_dsa_sink);
+        ggml_set_name(inp->self_dsa_sink, "dsa_sink");
     }
 
     return (llm_graph_input_attn_k_dsa *) res->add_input(std::move(inp));
