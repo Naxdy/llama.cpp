@@ -31,6 +31,14 @@ void llama_model_glm_dsa::load_arch_hparams(llama_model_loader & ml) {
     ml.get_key(LLM_KV_ATTENTION_INDEXER_KEY_LENGTH, hparams.indexer_head_size);
     ml.get_key(LLM_KV_ATTENTION_INDEXER_TOP_K,      hparams.indexer_top_k);
 
+    // GLM-5.2 IndexShare: per-layer full/shared indexer map. "full" layers compute their own
+    // lightning-indexer top-k; "shared" layers reuse the previous "full" layer's selection.
+    // Derived from GLM-5.2's config indexer_types rule (full iff il<=1 or il%4==2).
+    // Existing GGUFs carry no per-layer metadata, so the derivation is the source of truth.
+    for (uint32_t il = 0; il < hparams.n_layer(); ++il) {
+        hparams.indexer_is_full[il] = (il <= 1) || (il % 4 == 2);
+    }
+
     if (ml.get_key(LLM_KV_ROPE_SCALING_YARN_LOG_MUL, hparams.rope_yarn_log_mul, false)) {
         // [TAG_DEEPSEEK2_YARN_LOG_MUL_FIX]
         // cancel the factor from the convert script
@@ -213,6 +221,12 @@ llama_model_glm_dsa::graph::graph(const llama_model & model, const llm_graph_par
 
     ggml_tensor * inp_out_ids = build_inp_out_ids();
 
+    // GLM-5.2 IndexShare: "full" layers compute their own lightning-indexer top-k;
+    // "shared" layers reuse the previous "full" layer's top-k. The full/shared map is
+    // hparams.indexer_is_full (derived from the GLM-5.2 config rule: full iff il<=1 or il%4==2).
+    // top_k persists across layers so shared layers can reuse the last full layer's selection.
+    ggml_tensor * top_k = nullptr;
+
     for (int il = 0; il < n_layer; ++il) {
         ggml_tensor * inpSA = inpL;
 
@@ -228,10 +242,8 @@ llama_model_glm_dsa::graph::graph(const llama_model & model, const llm_graph_par
             qr = build_norm(qr, model.layers[il].attn_q_a_norm, nullptr, LLM_NORM_RMS, il);
             cb(qr, "qr", il);
 
-            ggml_tensor * top_k = nullptr;
-
-            // lightning indexer
-            {
+            // lightning indexer (only for "full" layers; "shared" layers reuse top_k)
+            if (hparams.indexer_is_full[il]) {
                 ggml_tensor * indexer_q = ggml_mul_mat(ctx0, model.layers[il].indexer_attn_q_b, qr);
                 cb(indexer_q, "indexer_q", il);
 

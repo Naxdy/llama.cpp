@@ -227,6 +227,10 @@ struct llama_hparams {
     uint32_t indexer_head_size = 0;
     uint32_t indexer_top_k     = 0;
 
+    // GLM-5.2 IndexShare: per-layer full/shared indexer map. "full" layers compute their own
+    // lightning-indexer top-k; "shared" layers reuse the previous "full" layer's top-k.
+    std::array<bool, LLAMA_MAX_LAYERS> indexer_is_full = {};
+
     // DeepSeek-V4
     uint32_t dsv4_o_group_count        = 0;
     uint32_t dsv4_o_lora_rank          = 0;
