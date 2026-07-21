@@ -2060,6 +2060,7 @@ llama_memory_i * llama_model::create_memory(const llama_memory_params & params, 
             {
                 res = nullptr;
             } break;
+        case LLM_ARCH_GLM_DSA:
         case LLM_ARCH_DEEPSEEK32:
             {
                 res = new llama_kv_cache_dsa(
