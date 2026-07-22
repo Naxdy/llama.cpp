@@ -192,7 +192,6 @@ llama_model_glm_dsa::graph::graph(const llama_model & model, const llm_graph_par
     const int64_t n_embd_indexer_head = hparams.indexer_head_size;
     const int64_t n_embd_indexer_head_rope = hparams.n_rot();
     const int64_t n_embd_indexer_head_nope = n_embd_indexer_head - n_embd_indexer_head_rope;
-    const uint32_t n_indexer_top_k = hparams.indexer_top_k;
 
     const uint32_t kv_lora_rank = hparams.n_lora_kv;
 
@@ -379,9 +378,13 @@ llama_model_glm_dsa::graph::graph(const llama_model & model, const llm_graph_par
                     cb(indexer_score, "indexer_score_sink", il);
                 }
 
-                // get indices of top k indexer scores
-                uint32_t n_top_k = indexer_score->ne[0] < n_indexer_top_k ? (uint32_t) indexer_score->ne[0] : n_indexer_top_k;
-                top_k = ggml_cont(ctx0, ggml_top_k(ctx0, indexer_score, n_top_k));
+                // FULL descending argsort of indexer scores: sorted[rank] = key index
+                // with the rank-th highest score. The sparse mask builder in build_attn
+                // scatters a rank-based penalty into EVERY key slot (argsort is a full
+                // permutation), avoiding the ggml_set_rows CUDA quirk where partially-
+                // written destinations keep uninitialized rows (corrupts the mask when
+                // n_kv > n_top_k, i.e. during prompt processing with long prompts).
+                top_k = ggml_argsort(ctx0, indexer_score, GGML_SORT_ORDER_DESC);
                 cb(top_k, "top_k", il);
             }
 

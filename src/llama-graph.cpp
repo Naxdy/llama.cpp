@@ -2824,31 +2824,58 @@ ggml_tensor * llm_graph_context::build_attn(
 
     const auto & kq_mask = inp->get_kq_mask_mla();
 
-    // prepare new kq mask - starts filled with -INFINITY
-    ggml_tensor * kq_mask_all = ggml_fill(ctx0, kq_mask, -INFINITY);
+    // DSA sparse mask: the argsort-based rank penalty scatters a value into EVERY
+    // key slot (argsort is a full permutation), avoiding the ggml_set_rows CUDA
+    // quirk where partially-written destinations keep uninitialized rows — which
+    // corrupts the mask when n_kv > n_top_k (long prompts during PP).
+    //
+    // top_k (passed by the caller) is the FULL descending argsort of the indexer
+    // scores: top_k[rank, batch, 0, stream] = key index with the rank-th highest
+    // score for that query. Shape: {n_kv, n_batch, 1, n_stream}.
+    ggml_tensor * kq_mask_top_k;
+    {
+        const float BIG = 1e30f;
 
-    // reshape KQ mask into tensor with rows of size 1:
-    // [n_kv, n_batch, 1, n_stream] -> [1, n_kv, n_batch, n_stream]
-    kq_mask_all = ggml_view_4d(ctx0, kq_mask_all, 1, kq_mask_all->ne[0], kq_mask_all->ne[1], kq_mask_all->ne[3], kq_mask_all->nb[0], kq_mask_all->nb[1], kq_mask_all->nb[2], 0);
+        const int64_t n_kv     = kq_mask->ne[0];
+        const int64_t n_batch  = kq_mask->ne[1];
+        const int64_t n_stream = kq_mask->ne[3];
 
-    // reshape top_k indices: [n_top_k, n_batch, 1, n_stream] -> [n_top_k, n_batch, n_stream, 1]
-    ggml_tensor * top_k_3d = ggml_view_4d(ctx0, top_k, top_k->ne[0], top_k->ne[1], top_k->ne[3], 1, top_k->nb[1], top_k->nb[2], top_k->ne[3]*top_k->nb[3], 0);
+        const uint32_t n_top_k = std::min((uint32_t) n_kv, hparams.indexer_top_k);
 
-    // prepare zero-filled tensor with rows of size 1: [1, n_top_k, n_batch, n_stream]
-    // this will be our source of zero values for unmasking top k mask elements
-    ggml_tensor * zeros = ggml_new_tensor_4d(ctx0, GGML_TYPE_F32, 1, top_k_3d->ne[0], top_k_3d->ne[1], top_k_3d->ne[2]);
-    zeros = ggml_fill(ctx0, zeros, 0.0f);
+        // rank-based penalty: 0 for rank < n_top_k, -BIG for rank >= n_top_k
+        // pen = step(n_top_k - 0.5 - rank) * BIG - BIG
+        ggml_tensor * rank = ggml_arange(ctx0, 0.0f, (float) n_kv, 1.0f);
+        ggml_tensor * sel  = ggml_step(ctx0, ggml_scale_bias(ctx0, rank, -1.0f, (float) n_top_k - 0.5f));
+        ggml_tensor * pen  = ggml_scale_bias(ctx0, sel, BIG, -BIG);
+        cb(rank, "dsa_rank", il);
+        cb(sel,  "dsa_sel",  il);
+        cb(pen,  "dsa_pen",  il);
 
-    // modify KQ mask by unmasking elements that are in top_k indices
-    // ggml_set_rows([1, n_kv, n_batch, n_stream], [1, n_top_k, n_batch, n_stream], [n_top_k, n_batch, n_stream, 1])
-    ggml_tensor * kq_mask_top_k = ggml_set_rows(ctx0, kq_mask_all, zeros, top_k_3d);
+        // broadcast pen to {1, n_kv, n_batch, n_stream}
+        pen = ggml_reshape_4d(ctx0, pen, 1, n_kv, 1, 1);
+        ggml_tensor * pen_b = ggml_new_tensor_4d(ctx0, GGML_TYPE_F32, 1, n_kv, n_batch, n_stream);
+        pen_b = ggml_repeat(ctx0, pen, pen_b);
+        cb(pen_b, "dsa_pen_b", il);
 
-    // reshape to restore the original shape of KQ mask:
-    // [1, n_kv, n_batch, n_stream] -> [n_kv, n_batch, 1, n_stream]
-    kq_mask_top_k = ggml_view_4d(ctx0, kq_mask_top_k, kq_mask_top_k->ne[1], kq_mask_top_k->ne[2], 1, kq_mask_top_k->ne[3], kq_mask_top_k->nb[2], kq_mask_top_k->nb[3], kq_mask_top_k->nb[3], 0);
+        // base: {1, n_kv, n_batch, n_stream} — contents irrelevant (fully overwritten by set_rows)
+        ggml_tensor * base = ggml_new_tensor_4d(ctx0, GGML_TYPE_F32, 1, n_kv, n_batch, n_stream);
+        base = ggml_fill(ctx0, base, -BIG);
 
-    // combine with the original kq mask
-    kq_mask_top_k = ggml_add(ctx0, kq_mask_top_k, kq_mask);
+        // indices: reshape argsort to {n_kv, n_batch, n_stream, 1} for set_rows
+        ggml_tensor * idx = ggml_view_4d(ctx0, top_k, top_k->ne[0], top_k->ne[1], top_k->ne[3], 1,
+                                         top_k->nb[1], top_k->nb[2], top_k->ne[3]*top_k->nb[3], 0);
+
+        // scatter pen_b into base using argsort indices — every key slot is written
+        ggml_tensor * scattered = ggml_set_rows(ctx0, base, pen_b, idx);
+
+        // reshape to {n_kv, n_batch, 1, n_stream}
+        kq_mask_top_k = ggml_view_4d(ctx0, scattered,
+                                     scattered->ne[1], scattered->ne[2], 1, scattered->ne[3],
+                                     scattered->nb[2], scattered->nb[3], scattered->nb[3], 0);
+
+        // add causal mask
+        kq_mask_top_k = ggml_add(ctx0, kq_mask_top_k, kq_mask);
+    }
 
     ggml_tensor * q = q_cur;
     ggml_tensor * k = mctx_cur->get_k(ctx0, il);
