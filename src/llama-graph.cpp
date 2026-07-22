@@ -2873,6 +2873,11 @@ ggml_tensor * llm_graph_context::build_attn(
                                      scattered->ne[1], scattered->ne[2], 1, scattered->ne[3],
                                      scattered->nb[2], scattered->nb[3], scattered->nb[3], 0);
 
+        // Cast to kq_mask->type (F16 for flash_attn, F32 otherwise).
+        // ggml_arange/step/scale_bias produce F32; flash_attn requires F16 mask.
+        kq_mask_top_k = ggml_cpy(ctx0, kq_mask_top_k,
+            ggml_new_tensor_4d(ctx0, kq_mask->type, kq_mask->ne[0], kq_mask->ne[1], kq_mask->ne[2], kq_mask->ne[3]));
+
         // add causal mask
         kq_mask_top_k = ggml_add(ctx0, kq_mask_top_k, kq_mask);
     }
